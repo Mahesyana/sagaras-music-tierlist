@@ -8,8 +8,18 @@ const HUES = [210, 230, 255, 285, 330, 5, 30, 160, 180, 200];
 let S = { songs: [], lists: [], entries: [], snaps: [] };
 let V = 'dash';
 let L = null;
-let ui = { sc: 'lib', tt: [0, 1, 2, 3, 4], q: '', cf: '', lq: '' };
+let ui = {
+    sc: 'lib',
+    tt: [0, 1, 2, 3, 4],
+    q: '',
+    cf: '',
+    lq: '',
+    selSongs: new Set(),
+    selSnaps: new Set(),
+    selLists: new Set()
+};
 let DB;
+
 // ------------------------------------------------------------
 // Utilitas umum
 // ------------------------------------------------------------
@@ -23,11 +33,13 @@ let ft;
 
 function flash(m, e) {
     const f = $('#fl');
+    if (!f) return;
     f.textContent = m;
     f.className = 's' + (e ? ' e' : '');
     clearTimeout(ft);
     ft = setTimeout(() => f.className = '', e ? 4000 : 1200);
 }
+
 // ------------------------------------------------------------
 // Penyimpanan lokal: IndexedDB
 // ------------------------------------------------------------
@@ -71,15 +83,16 @@ async function del(st, ...ids) {
         flash('Gagal: ' + (e && e.message), 1);
     }
 }
+
 // ------------------------------------------------------------
 // Komponen dan helper tampilan
 // ------------------------------------------------------------
 const fs = t => t.length > 40 ? 7 : t.length > 25 ? 9 : t.length > 14 ? 11 : 14;
 const art = s => `<div class="art" style="background:${s.img ? `url('${s.img}') center/cover,` : ''}hsl(${s.hue} 55% 32%)">${s.img ? '' : `<b style="font-size:${fs(s.title)}cqw">${esc(s.title)}</b><i>${esc(s.artist)}</i>`}</div>`;
-const songCard = (s, extra = '') => `<div class="card">${art(s)}<div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist)} · <span class="tag">${esc(s.cat)}</span></div>${extra}</div>`;
+const songCard = (s, extra = '', checkHtml = '') => `<div class="card">${checkHtml}${art(s)}<div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist)} · <span class="tag">${esc(s.cat)}</span></div>${extra}</div>`;
 
-function modal(h) {
-    $('#mo').innerHTML = `<div class="md">${h}</div>`;
+function modal(h, wide = false) {
+    $('#mo').innerHTML = `<div class="md ${wide ? 'wide' : ''}">${h}</div>`;
     $('#mo').style.display = 'flex';
 }
 const close = () => {
@@ -89,11 +102,12 @@ const close = () => {
 
 function ask(msg, fn, lbl = 'Ya, lanjutkan') {
     ui.yes = fn;
-    modal(`<p>${msg}</p><div class="row"><button class="b dg" data-a="yes">${lbl}</button><button class="b" data-a="close">Batal</button></div>`);
+    modal(`<p>${msg}</p><div class="row" style="margin-top:16px"><button class="b dg" data-a="yes">${lbl}</button><button class="b" data-a="close">Batal</button></div>`);
 }
 
 function touch(id) {
     const l = lst(id);
+    if (!l) return;
     l.updated = Date.now();
     put('lists', l);
 }
@@ -112,11 +126,21 @@ const topTies = r => {
 };
 const bars = (r, tot, col) => r.map(([k, v]) => `<div class="bar"><span style="width:120px">${esc(k)}</span><div style="width:${tot ? v / tot * 60 : 0}%;${col ? 'background:' + col : ''}"></div><span>${v}${tot ? ' · ' + Math.round(v / tot * 100) + '%' : ''}</span></div>`).join('');
 const eL = id => S.entries.filter(e => e.listId === id);
+
 // ------------------------------------------------------------
 // Navigasi dan rendering halaman
 // ------------------------------------------------------------
 const render = () => {
-    $('#nav').innerHTML = [['dash', 'Dashboard'], ['list', 'Tierlist'], ['lib', 'Music Library'], ['hist', 'Ranking History'], ['stat', 'Statistik'], ['bak', 'Backup']].map(([k, n], j) => `<button class="${V === k ? 'on' : ''}" data-a="nav" data-i="${k}"><em>0${j + 1}</em>${n}</button>`).join('');
+    $('#nav').innerHTML = [
+        ['dash', 'Dashboard'],
+        ['list', 'Tierlist'],
+        ['lib', 'Music Library'],
+        ['hist', 'Ranking History'],
+        ['stat', 'Statistik'],
+        ['bak', 'Backup']
+    ].map(([k, n], j) => `<button class="${V === k ? 'on' : ''}" data-a="nav" data-i="${k}"><em>0${j + 1}</em>${n}</button>`).join('') +
+    `<button class="b sm" data-a="showGuide" style="margin-left:auto;align-self:center;margin-bottom:6px">📖 Panduan Fitur</button>`;
+
     const a = document.activeElement;
     const id = a && a.id;
     const pos = a && a.selectionStart;
@@ -131,41 +155,152 @@ const render = () => {
         }
     }
 };
+
 const needL = () => `<div class="empty">Pilih atau buat tierlist dulu di Dashboard.<br><br><button class="b p" data-a="nav" data-i="dash">Ke Dashboard</button></div>`;
 const listSel = k => `<select data-s="${k}">${S.lists.map(l => `<option value="${l.id}" ${l.id === L ? 'selected' : ''}>${esc(l.title)}</option>`).join('')}</select>`;
 
 // ------------------------------------------------------------
-// Halaman Dashboard dan Music Library
+// Halaman Dashboard
 // ------------------------------------------------------------
 function vDash() {
     const q = ui.q.toLowerCase();
     const ls = S.lists.filter(l => l.title.toLowerCase().includes(q)).sort((a, b) => b.updated - a.updated);
-    return `<h2>Dashboard</h2><div class="row"><input id="nl" placeholder="Judul tierlist baru" maxlength="80"><button class="b p" data-a="newList">+ Buat Tierlist</button><input id="dq" data-q="q" placeholder="Cari tierlist…" value="${esc(ui.q)}"></div>
-${ls.length ? `<div class="grid lg">${ls.map(l => `<div class="panel"><b>${esc(l.title)}</b><div class="mu" style="font-size:12px">${eL(l.id).length} lagu<br>Dibuat ${fmt(l.created)}<br>Diperbarui ${fmt(l.updated)}</div><div class="row" style="margin:8px 0 0"><button class="b p sm" data-a="open" data-i="${l.id}">Buka</button><button class="b sm" data-a="ren" data-i="${l.id}">Ganti judul</button><button class="b sm" data-a="dup" data-i="${l.id}">Salin</button><button class="b sm dg" data-a="delList" data-i="${l.id}">Hapus</button></div></div>`).join('')}</div>` : `<div class="empty">${S.lists.length ? 'Tidak ada tierlist yang cocok.' : 'Belum ada tierlist. Beri judul lalu klik “Buat Tierlist”.'}</div>`}`;
+    const selCount = ui.selLists.size;
+
+    return `<h2>Dashboard</h2>
+    <div class="row">
+        <input id="nl" placeholder="Judul tierlist baru" maxlength="80">
+        <button class="b p" data-a="newList">+ Buat Tierlist</button>
+        <input id="dq" data-q="q" placeholder="Cari tierlist…" value="${esc(ui.q)}">
+    </div>
+    ${ls.length ? `
+    <div class="bulk-bar">
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px">
+            <input type="checkbox" data-chk="allLists" ${ls.length > 0 && ls.every(l => ui.selLists.has(l.id)) ? 'checked' : ''}>
+            <span>Pilih Semua (${ls.length})</span>
+        </label>
+        ${selCount > 0 ? `
+            <span class="mu" style="margin-left:auto">${selCount} tierlist dipilih</span>
+            <button class="b sm dg" data-a="bulkDelLists">🗑 Hapus Terpilih (${selCount})</button>
+            <button class="b sm" data-a="clearSelLists">Batal Pilih</button>
+        ` : ''}
+    </div>
+    <div class="grid lg">
+        ${ls.map(l => `
+            <div class="panel" style="position:relative">
+                <div class="select-box-wrap">
+                    <input type="checkbox" data-chk="list" data-i="${l.id}" ${ui.selLists.has(l.id) ? 'checked' : ''}>
+                </div>
+                <div style="padding-left:26px"><b>${esc(l.title)}</b></div>
+                <div class="mu" style="font-size:12px;margin-top:4px">${eL(l.id).length} lagu<br>Dibuat ${fmt(l.created)}<br>Diperbarui ${fmt(l.updated)}</div>
+                <div class="row" style="margin:8px 0 0">
+                    <button class="b p sm" data-a="open" data-i="${l.id}">Buka</button>
+                    <button class="b sm" data-a="ren" data-i="${l.id}">Ganti judul</button>
+                    <button class="b sm" data-a="dup" data-i="${l.id}">Salin</button>
+                    <button class="b sm dg" data-a="delList" data-i="${l.id}">Hapus</button>
+                </div>
+            </div>
+        `).join('')}
+    </div>` : `<div class="empty">${S.lists.length ? 'Tidak ada tierlist yang cocok.' : 'Belum ada tierlist. Beri judul lalu klik “Buat Tierlist”.'}</div>`}`;
 }
 
+// ------------------------------------------------------------
+// Halaman Music Library
+// ------------------------------------------------------------
 function vLib() {
     const q = ui.lq.toLowerCase();
     const ss = S.songs.filter(s => (!ui.cf || s.cat === ui.cf) && (s.title + ' ' + s.artist).toLowerCase().includes(q));
-    return `<h2>Music Library Bersama</h2><div class="row"><button class="b p" data-a="songForm">+ Tambah Lagu</button><input id="lq" data-q="lq" placeholder="Cari judul / artis" value="${esc(ui.lq)}"><select data-s="cf"><option value="">Semua kategori</option>${CATS.map(c => `<option ${ui.cf === c ? 'selected' : ''}>${c}</option>`).join('')}</select>${L ? `<span class="mu">Menambah ke: <b>${esc(lst(L).title)}</b></span>` : ''}</div>
-${ss.length ? `<div class="grid">${ss.map(s => songCard(s, `<div class="row" style="margin:4px 0 0;gap:4px">${L ? `<button class="b sm p" data-a="addTo" data-i="${s.id}" ${eL(L).some(e => e.songId === s.id) ? 'disabled' : ''}>${eL(L).some(e => e.songId === s.id) ? 'Sudah ada' : '+ Tierlist'}</button>` : ''}<button class="b sm" data-a="songForm" data-i="${s.id}">Edit</button><button class="b sm dg" data-a="delSong" data-i="${s.id}">Hapus</button></div>`)).join('')}</div>` : `<div class="empty">${S.songs.length ? 'Tidak ada lagu yang cocok.' : 'Library masih kosong. Tambahkan lagu pertama Anda.'}</div>`}`;
+    const selCount = ui.selSongs.size;
+
+    return `<h2>Music Library Bersama</h2>
+    <div class="row">
+        <button class="b p" data-a="songForm">+ Tambah Lagu</button>
+        <input id="lq" data-q="lq" placeholder="Cari judul / artis" value="${esc(ui.lq)}">
+        <select data-s="cf">
+            <option value="">Semua kategori</option>
+            ${CATS.map(c => `<option ${ui.cf === c ? 'selected' : ''}>${c}</option>`).join('')}
+        </select>
+        ${L ? `<span class="mu">Menambah ke: <b>${esc(lst(L).title)}</b></span>` : ''}
+    </div>
+    ${ss.length ? `
+    <div class="bulk-bar">
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px">
+            <input type="checkbox" data-chk="allSongs" ${ss.length > 0 && ss.every(s => ui.selSongs.has(s.id)) ? 'checked' : ''}>
+            <span>Pilih Semua (${ss.length})</span>
+        </label>
+        ${selCount > 0 ? `
+            <span class="mu" style="margin-left:auto">${selCount} lagu dipilih</span>
+            <button class="b sm dg" data-a="bulkDelSongs">🗑 Hapus Terpilih (${selCount})</button>
+            <button class="b sm" data-a="clearSelSongs">Batal Pilih</button>
+        ` : ''}
+    </div>
+    <div class="grid">
+        ${ss.map(s => {
+            const chk = `<div class="select-box-wrap"><input type="checkbox" data-chk="song" data-i="${s.id}" ${ui.selSongs.has(s.id) ? 'checked' : ''}></div>`;
+            return songCard(s, `
+                <div class="row" style="margin:4px 0 0;gap:4px">
+                    ${L ? `<button class="b sm p" data-a="addTo" data-i="${s.id}" ${eL(L).some(e => e.songId === s.id) ? 'disabled' : ''}>${eL(L).some(e => e.songId === s.id) ? 'Sudah ada' : '+ Tierlist'}</button>` : ''}
+                    <button class="b sm" data-a="songForm" data-i="${s.id}">Edit</button>
+                    <button class="b sm dg" data-a="delSong" data-i="${s.id}">Hapus</button>
+                </div>
+            `, chk);
+        }).join('')}
+    </div>` : `<div class="empty">${S.songs.length ? 'Tidak ada lagu yang cocok.' : 'Library masih kosong. Tambahkan lagu pertama Anda.'}</div>`}`;
 }
 
+// ------------------------------------------------------------
+// Halaman Tierlist
+// ------------------------------------------------------------
 function vList() {
     if (!L || !lst(L))
         return needL();
     const es = eL(L).filter(e => sg(e.songId)).sort((a, b) => a.order - b.order);
     const l = lst(L);
+
     const card = e => {
         const s = sg(e.songId);
-        return `<div class="card" draggable="true" data-e="${e.id}">${art(s)}<div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist)}</div><div style="display:flex;gap:2px"><button class="b sm" data-a="left" data-i="${e.id}">◀</button><button class="b sm" data-a="right" data-i="${e.id}">▶</button><select data-mv="${e.id}"><option>Pindah…</option>${TN.map((n, i) => `<option value="${i}">${n}</option>`).join('')}<option value="-1">Belum ditempatkan</option><option value="x">Keluarkan</option></select></div></div>`;
+        return `<div class="card" draggable="true" data-e="${e.id}">
+            <button class="card-remove-btn" data-a="removeFromList" data-i="${e.id}" title="Keluarkan lagu dari tierlist ini">✕</button>
+            ${art(s)}
+            <div class="t">${esc(s.title)}</div>
+            <div class="a">${esc(s.artist)}</div>
+            <div style="display:flex;gap:2px">
+                <button class="b sm" data-a="left" data-i="${e.id}">◀</button>
+                <button class="b sm" data-a="right" data-i="${e.id}">▶</button>
+                <select data-mv="${e.id}">
+                    <option>Pindah…</option>
+                    ${TN.map((n, i) => `<option value="${i}">${n}</option>`).join('')}
+                    <option value="-1">Belum ditempatkan</option>
+                    <option value="x">✕ Keluarkan</option>
+                </select>
+            </div>
+        </div>`;
     };
-    const zone = (t, n, c) => `<div class="tier"><div class="tl" style="--c:${c}"><em>${t >= 0 ? "T-0" + (t + 1) : "T-XX"}</em>${n}<small>${es.filter(e => e.tier === t).length} lagu</small></div><div class="zone" data-z="${t}">${es.filter(e => e.tier === t).map(card).join('')}</div></div>`;
-    return `<h2>${esc(l.title)}</h2><div class="row"><button class="b p" data-a="picker">+ Tambah dari Library</button><button class="b" data-a="exportForm">Ekspor PNG</button><button class="b" data-a="snap">📸 Buat Snapshot</button><span class="mu">Seret kartu antar tier, atau pakai ◀ ▶ dan menu “Pindah”.</span></div>${TN.map((n, i) => zone(i, n, TC[i])).join('')}${zone(-1, 'Belum ditempatkan', '#cbd5f0')}`;
+
+    const zone = (t, n, c) => `
+        <div class="tier">
+            <div class="tl" style="--c:${c}">
+                <em>${t >= 0 ? "T-0" + (t + 1) : "T-XX"}</em>${n}
+                <small>${es.filter(e => e.tier === t).length} lagu</small>
+            </div>
+            <div class="zone" data-z="${t}">
+                ${es.filter(e => e.tier === t).map(card).join('')}
+            </div>
+        </div>`;
+
+    return `<h2>${esc(l.title)}</h2>
+    <div class="row">
+        <button class="b p" data-a="picker">+ Tambah dari Library</button>
+        <button class="b" data-a="exportForm">Ekspor PNG</button>
+        <button class="b" data-a="snap">📸 Buat Snapshot</button>
+        <span class="mu">Klik <b>✕</b> pada kartu atau menu "Keluarkan" untuk menghapus lagu dari tierlist.</span>
+    </div>
+    ${TN.map((n, i) => zone(i, n, TC[i])).join('')}
+    ${zone(-1, 'Belum ditempatkan', '#cbd5f0')}`;
 }
 
 // ------------------------------------------------------------
-// Grafik, Ranking History, dan statistik
+// Grafik, Ranking History, dan Penjelasan Snapshot
 // ------------------------------------------------------------
 function chart(snaps) {
     const W = 640;
@@ -200,12 +335,11 @@ function vHist() {
     const r1 = Math.min(ui.r1 == null ? all.length - 1 : +ui.r1, all.length - 1);
     const rng = all.slice(Math.max(0, r0), r1 + 1);
     const opt = (k, v) => all.map((s, i) => `<option value="${i}" ${i == v ? 'selected' : ''}>${fmt(s.ts)}</option>`).join('');
+    const selCount = ui.selSnaps.size;
+
     let cmp = '';
     if (all.length >= 2) {
-        // ------------------------------------------------------------
-// Aksi antarmuka
-// ------------------------------------------------------------
-const A = all[ui.ca ?? 0] || all[0];
+        const A = all[ui.ca ?? 0] || all[0];
         const B = all[ui.cb ?? all.length - 1] || all[all.length - 1];
         const mA = new Map(A.items.map(i => [i.songId, i]));
         const mB = new Map(B.items.map(i => [i.songId, i]));
@@ -218,13 +352,67 @@ const A = all[ui.ca ?? 0] || all[0];
             if (!mB.has(id))
                 rows.push([a.title, a.artist, 'Tidak ada lagi', TN[a.tier], '—']);
         });
-        cmp = `<h3>Bandingkan Snapshot</h3><div class="row"><select data-s="ca">${opt('ca', ui.ca ?? 0)}</select> → <select data-s="cb">${opt('cb', ui.cb ?? all.length - 1)}</select></div><table><tr><th>Lagu</th><th>Status</th><th>Dari</th><th>Ke</th></tr>${rows.map(r => `<tr><td>${esc(r[0])}<br><span class="mu">${esc(r[1])}</span></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`).join('')}</table>`;
+        cmp = `<h3>Bandingkan Dua Snapshot</h3>
+        <p class="mu" style="font-size:12px;margin-bottom:8px">Pilih 2 waktu snapshot untuk melihat lagu mana saja yang posisinya naik, turun, baru, atau tetap.</p>
+        <div class="row"><select data-s="ca">${opt('ca', ui.ca ?? 0)}</select> → <select data-s="cb">${opt('cb', ui.cb ?? all.length - 1)}</select></div>
+        <table><tr><th>Lagu</th><th>Status</th><th>Dari</th><th>Ke</th></tr>${rows.map(r => `<tr><td>${esc(r[0])}<br><span class="mu">${esc(r[1])}</span></td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`).join('')}</table>`;
     }
-    return `<h2>Ranking History — ${esc(lst(L).title)}</h2><div class="row"><button class="b p" data-a="snap">📸 Buat Snapshot</button>${listSel('hl')}</div>
-${all.length ? `<div class="panel"><div class="row">${TN.map((n, i) => `<label><input type="checkbox" data-t="${i}" ${ui.tt.includes(i) ? 'checked' : ''}> <span style="color:${TC[i]}">●</span> ${n}</label>`).join(' ')}</div>${all.length > 2 ? `<div class="row">Rentang: <select data-s="r0">${opt('r0', r0)}</select> s/d <select data-s="r1">${opt('r1', r1)}</select></div>` : ''}${chart(rng)}${all.length === 1 ? '<p class="mu">Baru ada satu snapshot — belum cukup data untuk melihat tren.</p>' : ''}</div>` : `<div class="empty">Belum ada snapshot. Klik “Buat Snapshot” untuk merekam ranking saat ini sebagai titik pertama grafik.</div>`}
-<h3>Daftar Snapshot</h3>${[...all].reverse().map(s => `<div class="panel row" style="justify-content:space-between"><span>${fmt(s.ts)} · ${s.items.length} lagu</span><span><button class="b sm" data-a="viewSnap" data-i="${s.id}">Lihat</button> <button class="b sm dg" data-a="delSnap" data-i="${s.id}">Hapus</button></span></div>`).join('')}${cmp}`;
+
+    return `<h2>Ranking History — ${esc(lst(L).title)}</h2>
+    
+    <div class="panel" style="border-left: 3px solid var(--cy); background: rgba(53,230,255,0.03)">
+        <b style="color:var(--cy)">💡 Apa itu Snapshot?</b>
+        <p style="margin:6px 0 0;font-size:13px;line-height:1.6">
+            <b>Snapshot</b> adalah rekaman "foto arsip" posisi ranking tierlist pada detik tertentu. 
+            Saat Anda mengubah atau memindah lagu nanti, snapshot lama <b>tidak akan berubah</b>.
+            Dengan membuat snapshot secara berkala (misal: tiap minggu atau bulan), Anda bisa melihat <b>grafik perkembangan selera musik</b> dan membandingkan perubahan naik/turun lagu dari waktu ke waktu.
+        </p>
+    </div>
+
+    <div class="row">
+        <button class="b p" data-a="snap">📸 Rekam Snapshot Baru</button>
+        ${listSel('hl')}
+    </div>
+
+    ${all.length ? `
+    <div class="panel">
+        <div class="row">${TN.map((n, i) => `<label><input type="checkbox" data-t="${i}" ${ui.tt.includes(i) ? 'checked' : ''}> <span style="color:${TC[i]}">●</span> ${n}</label>`).join(' ')}</div>
+        ${all.length > 2 ? `<div class="row">Rentang: <select data-s="r0">${opt('r0', r0)}</select> s/d <select data-s="r1">${opt('r1', r1)}</select></div>` : ''}
+        ${chart(rng)}
+        ${all.length === 1 ? '<p class="mu">Baru ada satu snapshot — buat snapshot kedua di lain waktu untuk melihat grafik garis pergerakan tren.</p>' : ''}
+    </div>` : `<div class="empty">Belum ada snapshot untuk tierlist ini. Klik <b>“Rekam Snapshot Baru”</b> untuk mengabadikan ranking saat ini.</div>`}
+
+    <h3>Daftar Snapshot Tersimpan</h3>
+    ${all.length ? `
+    <div class="bulk-bar">
+        <label style="cursor:pointer;display:flex;align-items:center;gap:6px">
+            <input type="checkbox" data-chk="allSnaps" ${all.length > 0 && all.every(s => ui.selSnaps.has(s.id)) ? 'checked' : ''}>
+            <span>Pilih Semua (${all.length})</span>
+        </label>
+        ${selCount > 0 ? `
+            <span class="mu" style="margin-left:auto">${selCount} snapshot dipilih</span>
+            <button class="b sm dg" data-a="bulkDelSnaps">🗑 Hapus Terpilih (${selCount})</button>
+            <button class="b sm" data-a="clearSelSnaps">Batal Pilih</button>
+        ` : ''}
+    </div>
+    ${[...all].reverse().map(s => `
+        <div class="panel row" style="justify-content:space-between;align-items:center">
+            <label style="display:flex;align-items:center;gap:10px;cursor:pointer">
+                <input type="checkbox" data-chk="snap" data-i="${s.id}" ${ui.selSnaps.has(s.id) ? 'checked' : ''}>
+                <span>${fmt(s.ts)} · <b style="color:var(--cy)">${s.items.length}</b> lagu terarsip</span>
+            </label>
+            <span>
+                <button class="b sm" data-a="viewSnap" data-i="${s.id}">Lihat Detail</button>
+                <button class="b sm dg" data-a="delSnap" data-i="${s.id}">Hapus</button>
+            </span>
+        </div>
+    `).join('')}` : ''}
+    ${cmp}`;
 }
 
+// ------------------------------------------------------------
+// Statistik & Fitur Lagu Terbaik (Top di Banyak Tierlist)
+// ------------------------------------------------------------
 function vStat() {
     const lib = ui.sc === 'lib' || !lst(ui.sc);
     let songs;
@@ -239,39 +427,224 @@ function vStat() {
     const inT = t => es.filter(e => e.tier === t).map(e => sg(e.songId));
     const cs = ui.sf ? songs.filter(s => s.cat === ui.sf) : songs;
     const ar = ui.sa;
-    const head = `<h2>Music Taste Statistics</h2><div class="row"><select data-s="sc"><option value="lib">Library Overview</option>${S.lists.map(l => `<option value="${l.id}" ${ui.sc === l.id ? 'selected' : ''}>Tierlist: ${esc(l.title)}</option>`).join('')}</select><select data-s="sf"><option value="">Semua kategori</option>${CATS.map(c => `<option ${ui.sf === c ? 'selected' : ''}>${c}</option>`).join('')}</select></div>`;
-    if (!songs.length)
+
+    // --- Perhitungan Lagu Terbaik (Top di Banyak Tierlist) ---
+    // Mengumpulkan peringkat lagu di semua tierlist yang ada
+    const songTopStats = [];
+    S.songs.forEach(s => {
+        const entries = S.entries.filter(e => e.songId === s.id && e.tier === 0); // tier 0 = Top
+        if (entries.length > 0) {
+            const listNames = entries.map(e => lst(e.listId)?.title).filter(Boolean);
+            songTopStats.push({
+                song: s,
+                count: entries.length,
+                lists: listNames
+            });
+        }
+    });
+    // Urutkan berdasarkan kemunculan terbanyak di tier "Top"
+    songTopStats.sort((a, b) => b.count - a.count || a.song.title.localeCompare(b.song.title));
+
+    const head = `<h2>Music Taste Statistics</h2>
+    <div class="row">
+        <select data-s="sc">
+            <option value="lib">Library Overview (Seluruh Musik)</option>
+            ${S.lists.map(l => `<option value="${l.id}" ${ui.sc === l.id ? 'selected' : ''}>Tierlist: ${esc(l.title)}</option>`).join('')}
+        </select>
+        <select data-s="sf">
+            <option value="">Semua kategori</option>
+            ${CATS.map(c => `<option ${ui.sf === c ? 'selected' : ''}>${c}</option>`).join('')}
+        </select>
+    </div>`;
+
+    if (!songs.length && !S.songs.length)
         return head + `<div class="empty">Belum ada lagu ${lib ? 'di library' : 'di tierlist ini'}. Tambahkan lagu agar statistik muncul.</div>`;
+
+    // Bagian Lagu Terbaik Saat Ini
+    let bestSongsSection = `<h3>🏆 Lagu Terbaik Saat Ini (Paling Banyak Masuk Tier "Top")</h3>
+    <div class="panel">
+        <p class="mu" style="font-size:12px;margin-bottom:10px">
+            Menampilkan daftar lagu yang paling sering dinobatkan ke dalam kasta tertinggi (Tier <b>Top</b>) di berbagai tierlist Anda.
+        </p>
+        ${songTopStats.length ? `
+            <div style="overflow-x:auto">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width:50px">Rank</th>
+                            <th>Lagu & Artis</th>
+                            <th>Kategori</th>
+                            <th>Jumlah "Top"</th>
+                            <th>Berada di Tierlist</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${songTopStats.slice(0, 10).map((item, idx) => `
+                            <tr>
+                                <td><b>#${idx + 1}</b></td>
+                                <td>
+                                    <b>${esc(item.song.title)}</b><br>
+                                    <span class="mu">${esc(item.song.artist)}</span>
+                                </td>
+                                <td><span class="tag">${esc(item.song.cat)}</span></td>
+                                <td><span class="badge-top">★ ${item.count} Tierlist</span></td>
+                                <td class="mu" style="font-size:12px">${item.lists.map(esc).join(', ')}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        ` : `<div class="mu" style="padding:10px 0">Belum ada lagu yang ditempatkan di posisi tier <b>Top</b> pada tierlist mana pun.</div>`}
+    </div>`;
+
     const arts = cnt(songs, s => s.artist);
     const cats = CATS.map(c => [c, songs.filter(s => s.cat === c).length]);
-    let o = head + `<div class="grid lg"><div class="panel"><b>${S.songs.length}</b> lagu unik di library<br><b>${S.lists.length}</b> tierlist</div>${lib ? '' : `<div class="panel"><b>${es.length - placed.length}</b> lagu belum ditempatkan<br><b>${placed.length}</b> lagu di lima tier</div>`}</div>`;
+
+    let o = head + bestSongsSection + `
+    <div class="grid lg">
+        <div class="panel"><b>${S.songs.length}</b> lagu unik di library<br><b>${S.lists.length}</b> tierlist</div>
+        ${lib ? '' : `<div class="panel"><b>${es.length - placed.length}</b> lagu belum ditempatkan<br><b>${placed.length}</b> lagu di lima tier</div>`}
+    </div>`;
+
     if (!lib)
-        o += `<h3>Distribusi Tier (dari lagu yang sudah ditempatkan)</h3><div class="panel">${placed.length ? TN.map((n, i) => [n, placed.filter(e => e.tier === i).length]).map(([n, v], i) => bars([[n, v]], placed.length, TC[i])).join('') : '<span class="mu">Belum ada lagu yang ditempatkan di tier.</span>'}</div>`;
-    o += `<h3>Statistik Artis</h3><div class="panel">Terbanyak di library: ${topTies(cnt(S.songs, s => s.artist))}`;
+        o += `<h3>Distribusi Tier (${esc(lst(ui.sc)?.title || '')})</h3>
+        <div class="panel">
+            ${placed.length ? TN.map((n, i) => [n, placed.filter(e => e.tier === i).length]).map(([n, v], i) => bars([[n, v]], placed.length, TC[i])).join('') : '<span class="mu">Belum ada lagu yang ditempatkan di tier.</span>'}
+        </div>`;
+
+    o += `<h3>Statistik Artis</h3>
+    <div class="panel">
+        Terbanyak di library: ${topTies(cnt(S.songs, s => s.artist))}`;
     if (!lib)
         o += `<br>Terbanyak di tier Top: ${topTies(cnt(inT(0), s => s.artist))}<br>Terbanyak di tier Banger: ${topTies(cnt(inT(1), s => s.artist))}`;
     else
-        o += `<br><span class="mu">Pilih tierlist untuk statistik artis per tier.</span>`;
-    o += `<p class="mu" style="font-size:12px">Jumlah lagu bukan ukuran tingkat kesukaan.</p><select data-s="sa"><option value="">Lihat lagu per artis…</option>${arts.map(a => `<option ${ar === a[0] ? 'selected' : ''}>${esc(a[0])}</option>`).join('')}</select>${ar ? '<ul>' + songs.filter(s => s.artist === ar).map(s => `<li>${esc(s.title)}</li>`).join('') + '</ul>' : ''}</div>`;
-    o += `<h3>Kategori Musik</h3><div class="panel">${bars(cats, songs.length)}${lib ? '' : `<table><tr><th>Kategori</th><th>Top</th><th>Banger</th></tr>${CATS.map(c => `<tr><td>${c}</td><td>${inT(0).filter(s => s.cat === c).length}</td><td>${inT(1).filter(s => s.cat === c).length}</td></tr>`).join('')}</table>`}<h3>Daftar lagu ${ui.sf || '(semua kategori)'}</h3>${cs.map(s => `<span class="tag">${esc(s.title)} — ${esc(s.artist)}</span> `).join('') || '<span class="mu">Kosong</span>'}</div>`;
+        o += `<br><span class="mu">Pilih tierlist spesifik di dropdown atas untuk melihat artis per tier.</span>`;
+    
+    o += `<p class="mu" style="font-size:12px">Jumlah lagu bukan ukuran tingkat kesukaan.</p>
+    <select data-s="sa"><option value="">Lihat lagu per artis…</option>${arts.map(a => `<option ${ar === a[0] ? 'selected' : ''}>${esc(a[0])}</option>`).join('')}</select>
+    ${ar ? '<ul>' + songs.filter(s => s.artist === ar).map(s => `<li>${esc(s.title)}</li>`).join('') + '</ul>' : ''}</div>`;
+
+    o += `<h3>Kategori Musik</h3>
+    <div class="panel">
+        ${bars(cats, songs.length)}
+        ${lib ? '' : `<table><tr><th>Kategori</th><th>Top</th><th>Banger</th></tr>${CATS.map(c => `<tr><td>${c}</td><td>${inT(0).filter(s => s.cat === c).length}</td><td>${inT(1).filter(s => s.cat === c).length}</td></tr>`).join('')}</table>`}
+        <h3>Daftar lagu ${ui.sf || '(semua kategori)'}</h3>
+        ${cs.map(s => `<span class="tag">${esc(s.title)} — ${esc(s.artist)}</span> `).join('') || '<span class="mu">Kosong</span>'}
+    </div>`;
+
     const sn = S.snaps.filter(s => !lib && s.listId === ui.sc).sort((a, b) => a.ts - b.ts);
-    o += `<h3>Tren Ranking</h3><div class="panel">${lib ? '<span class="mu">Pilih tierlist untuk melihat tren.</span>' : sn.length ? chart(sn) + (sn.length > 1 ? `<p class="mu">${sn.length} snapshot. Detail perbandingan ada di Ranking History.</p>` : '<p class="mu">Baru satu snapshot — belum cukup untuk tren.</p>') : '<span class="mu">Belum ada snapshot untuk tierlist ini.</span>'}</div>`;
+    o += `<h3>Tren Ranking</h3>
+    <div class="panel">
+        ${lib ? '<span class="mu">Pilih spesifik tierlist untuk melihat tren.</span>' : sn.length ? chart(sn) + (sn.length > 1 ? `<p class="mu">${sn.length} snapshot tercatat.</p>` : '<p class="mu">Baru satu snapshot.</p>') : '<span class="mu">Belum ada snapshot untuk tierlist ini.</span>'}
+    </div>`;
+
     return o;
 }
 
 // ------------------------------------------------------------
-// Halaman backup dan pengaturan
+// Halaman Backup & Pengaturan
 // ------------------------------------------------------------
 function vBak() {
-    return `<h2>Backup &amp; Pengaturan</h2><div class="panel"><p>Semua data tersimpan <b>hanya di browser ini</b> (IndexedDB). Data <b>tidak</b> tersinkron ke perangkat lain, dan bisa hilang jika Anda membersihkan data situs, kehilangan profil browser, atau penyimpanan rusak. Buat backup secara berkala.</p><div class="row"><button class="b p" data-a="backup">⬇ Unduh Backup (.json, termasuk gambar)</button><label class="b">⬆ Pulihkan dari berkas<input type="file" id="rf" accept=".json,application/json" hidden></label></div><p class="mu">Backup memuat library, gambar artwork, warna artwork pengganti, semua tierlist, urutan, dan snapshot.</p></div><div class="mu">${S.songs.length} lagu · ${S.lists.length} tierlist · ${S.snaps.length} snapshot</div>`;
+    return `<h2>Backup &amp; Pengaturan</h2>
+    <div class="panel">
+        <p>Semua data tersimpan <b>hanya di browser ini</b> (IndexedDB). Data <b>tidak</b> tersinkron ke perangkat lain, dan bisa hilang jika Anda membersihkan data situs atau cache browser. Buat backup secara berkala.</p>
+        <div class="row">
+            <button class="b p" data-a="backup">⬇ Unduh Backup (.json, termasuk gambar)</button>
+            <label class="b">⬆ Pulihkan dari berkas<input type="file" id="rf" accept=".json,application/json" hidden></label>
+        </div>
+        <p class="mu">Backup memuat library lagu, gambar artwork, daftar tierlist, posisi urutan, dan riwayat snapshot.</p>
+    </div>
+    <div class="mu">${S.songs.length} lagu · ${S.lists.length} tierlist · ${S.snaps.length} snapshot</div>`;
 }
-const A = { nav(e) {
+
+// ------------------------------------------------------------
+// Modal Panduan Lengkap untuk Pengguna Baru
+// ------------------------------------------------------------
+function showUserGuide() {
+    modal(`
+        <h3>📖 Panduan Lengkap Sagaras Music Tierlist</h3>
+        <p class="mu" style="margin-bottom:16px">Selamat datang! Berikut panduan singkat untuk setiap fitur di aplikasi ini:</p>
+        
+        <div class="guide-step">
+            <div class="guide-num">01</div>
+            <div>
+                <b style="color:#fff">Dashboard</b>
+                <div class="mu" style="font-size:13px;margin-top:2px">
+                    Tempat membuat dan mengelola daftar tierlist Anda. Anda dapat membuat beberapa tierlist (misalnya: "Tierlist 2026", "Anime OST", "Lagu Santai"). Mendukung pencarian, duplikasi (salin), dan <b>hapus banyak sekaligus</b>.
+                </div>
+            </div>
+        </div>
+
+        <div class="guide-step">
+            <div class="guide-num">02</div>
+            <div>
+                <b style="color:#fff">Tierlist</b>
+                <div class="mu" style="font-size:13px;margin-top:2px">
+                    Halaman utama penyusunan tier (Top, Banger, Lumayan, Belum Masuk, Gak Masuk). Anda bisa <b>menyeret (drag-and-drop)</b> lagu antar baris tier, mengatur urutan dengan tombol ◀ ▶, atau membatalkan lagu dengan tombol <b>✕ (Keluarkan)</b>. Tersedia juga fitur <b>Ekspor PNG</b> berkualitas tinggi!
+                </div>
+            </div>
+        </div>
+
+        <div class="guide-step">
+            <div class="guide-num">03</div>
+            <div>
+                <b style="color:#fff">Music Library Bersama</b>
+                <div class="mu" style="font-size:13px;margin-top:2px">
+                    Basis data seluruh lagu Anda. Lagu yang didaftarkan di sini bisa dipakai di berbagai tierlist tanpa perlu mendaftarkannya ulang. Mendukung upload foto sampul (dengan tombol <b>Hapus/Batal Foto</b>) serta <b>hapus lagu massal</b>.
+                </div>
+            </div>
+        </div>
+
+        <div class="guide-step">
+            <div class="guide-num">04</div>
+            <div>
+                <b style="color:#fff">Ranking History & Snapshot</b>
+                <div class="mu" style="font-size:13px;margin-top:2px">
+                    <b>Snapshot</b> adalah "foto kenangan" urutan ranking saat ini. Setiap kali Anda menekan <i>"Buat Snapshot"</i>, sistem menyimpan catatan permanen. Anda dapat membandingkan ranking bulan lalu vs sekarang untuk melihat lagu apa yang naik kasta atau turun!
+                </div>
+            </div>
+        </div>
+
+        <div class="guide-step">
+            <div class="guide-num">05</div>
+            <div>
+                <b style="color:#fff">Statistik & Lagu Terbaik</b>
+                <div class="mu" style="font-size:13px;margin-top:2px">
+                    Menganalisis selera musik Anda. Dilengkapi fitur <b>Lagu Terbaik Saat Ini</b> (lagu yang paling sering konsisten menempati tier <b>Top</b> di berbagai tierlist Anda), distribusi artis, dan genre.
+                </div>
+            </div>
+        </div>
+
+        <div class="guide-step">
+            <div class="guide-num">06</div>
+            <div>
+                <b style="color:#fff">Backup & Restore</b>
+                <div class="mu" style="font-size:13px;margin-top:2px">
+                    Simpan seluruh data ke file JSON di komputer Anda agar tidak hilang saat riwayat browser dibersihkan.
+                </div>
+            </div>
+        </div>
+
+        <div class="row" style="margin-top:16px;justify-content:flex-end">
+            <button class="b p" data-a="close">Saya Mengerti</button>
+        </div>
+    `, true);
+}
+
+// ------------------------------------------------------------
+// Aksi antarmuka (Handler)
+// ------------------------------------------------------------
+const A = {
+    nav(e) {
         V = e.dataset.i;
         if (V === 'list' && !L && S.lists.length)
             L = S.lists[0].id;
-        if ((V === 'hist') && !L && S.lists.length)
+        if (V === 'hist' && !L && S.lists.length)
             L = S.lists[0].id;
         render();
+    },
+    showGuide() {
+        showUserGuide();
     },
     newList() {
         const t = $('#nl').value.trim();
@@ -319,6 +692,7 @@ const A = { nav(e) {
             S.lists = S.lists.filter(l => l.id !== id);
             S.entries = S.entries.filter(x => x.listId !== id);
             S.snaps = S.snaps.filter(s => s.listId !== id);
+            ui.selLists.delete(id);
             if (L === id)
                 L = null;
             await del('lists', id);
@@ -328,7 +702,32 @@ const A = { nav(e) {
             render();
         });
     },
-    close, yes() {
+    bulkDelLists() {
+        const ids = Array.from(ui.selLists);
+        if (!ids.length) return;
+        ask(`Hapus <b>${ids.length} tierlist</b> yang dipilih beserta seluruh snapshot-nya? Lagu di library tetap aman.`, async () => {
+            const es = S.entries.filter(x => ids.includes(x.listId)).map(x => x.id);
+            const ss = S.snaps.filter(x => ids.includes(x.listId)).map(x => x.id);
+            S.lists = S.lists.filter(l => !ids.includes(l.id));
+            S.entries = S.entries.filter(x => !ids.includes(x.listId));
+            S.snaps = S.snaps.filter(x => !ids.includes(x.listId));
+            if (ids.includes(L))
+                L = S.lists.length ? S.lists[0].id : null;
+            ui.selLists.clear();
+            await del('lists', ...ids);
+            if (es.length) await del('entries', ...es);
+            if (ss.length) await del('snaps', ...ss);
+            close();
+            render();
+            flash(`${ids.length} tierlist berhasil dihapus ✓`);
+        });
+    },
+    clearSelLists() {
+        ui.selLists.clear();
+        render();
+    },
+    close,
+    yes() {
         const f = ui.yes;
         ui.yes = null;
         if (f)
@@ -339,11 +738,50 @@ const A = { nav(e) {
         ui.sid = s && s.id;
         ui.img = s ? s.img : null;
         ui.hue = s ? s.hue : HUES[Math.random() * HUES.length | 0];
-        modal(`<h3>${s ? 'Edit' : 'Tambah'} Lagu</h3><label>Judul lagu *</label><input id="ft" value="${esc(s?.title)}"><label>Artis *</label><input id="fa" value="${esc(s?.artist)}"><label>Kategori *</label><select id="fc">${CATS.map(c => `<option ${s && s.cat === c ? 'selected' : ''}>${c}</option>`).join('')}</select><label>Foto artwork (opsional, dipotong persegi di tengah)</label><input type="file" id="fi" accept="image/*"><div id="fp" style="width:140px;margin:10px 0">${art({ title: s?.title || 'Judul', artist: s?.artist || 'Artis', img: ui.img, hue: ui.hue })}</div>${ui.img ? '<button class="b sm" data-a="noimg">Hapus gambar</button>' : ''}<div class="err" id="fe"></div><div class="row" style="margin-top:12px"><button class="b p" data-a="saveSong">Simpan</button><button class="b" data-a="close">Batal</button></div>`);
+
+        const renderForm = () => {
+            modal(`
+                <h3>${s ? 'Edit' : 'Tambah'} Lagu</h3>
+                <label>Judul lagu *</label>
+                <input id="ft" value="${esc(s?.title || '')}">
+                <label>Artis *</label>
+                <input id="fa" value="${esc(s?.artist || '')}">
+                <label>Kategori *</label>
+                <select id="fc">
+                    ${CATS.map(c => `<option ${(s ? s.cat : CATS[0]) === c ? 'selected' : ''}>${c}</option>`).join('')}
+                </select>
+                <label>Foto artwork (opsional, dipotong persegi otomatis)</label>
+                <input type="file" id="fi" accept="image/*">
+                
+                <div style="display:flex;align-items:center;gap:14px;margin:10px 0">
+                    <div id="fp" style="width:110px;flex:none">
+                        ${art({ title: $('#ft')?.value || s?.title || 'Judul', artist: $('#fa')?.value || s?.artist || 'Artis', img: ui.img, hue: ui.hue })}
+                    </div>
+                    <div id="imgBtnWrap">
+                        ${ui.img ? '<button class="b sm dg" data-a="noimg">✕ Batalkan / Hapus Foto</button>' : '<span class="mu" style="font-size:12px">Warna fallback otomatis aktif bila tanpa foto.</span>'}
+                    </div>
+                </div>
+
+                <div class="err" id="fe"></div>
+                <div class="row" style="margin-top:14px">
+                    <button class="b p" data-a="saveSong">Simpan Lagu</button>
+                    <button class="b" data-a="close">Batal</button>
+                </div>
+            `);
+        };
+        renderForm();
     },
     noimg() {
         ui.img = null;
-        $('#fp').innerHTML = art({ title: $('#ft').value || 'Judul', artist: $('#fa').value || 'Artis', hue: ui.hue });
+        const fi = $('#fi');
+        if (fi) fi.value = '';
+        const title = $('#ft')?.value || 'Judul';
+        const artist = $('#fa')?.value || 'Artis';
+        const fp = $('#fp');
+        if (fp) fp.innerHTML = art({ title, artist, hue: ui.hue });
+        const wrap = $('#imgBtnWrap');
+        if (wrap) wrap.innerHTML = '<span class="mu" style="font-size:12px">Foto dibatalkan. Menggunakan warna tema.</span>';
+        flash('Pemasangan foto dibatalkan');
     },
     saveSong() {
         const t = $('#ft').value.trim();
@@ -372,11 +810,31 @@ const A = { nav(e) {
         ask(`Hapus “${esc(s.title)}” dari library?${n ? ` Lagu ini dipakai di <b>${n} tierlist</b> dan akan ikut dikeluarkan dari sana (snapshot lama tetap utuh).` : ''}`, async () => {
             S.songs = S.songs.filter(x => x.id !== s.id);
             S.entries = S.entries.filter(x => x.songId !== s.id);
+            ui.selSongs.delete(s.id);
             await del('songs', s.id);
             await del('entries', ...u.map(x => x.id));
             close();
             render();
         });
+    },
+    bulkDelSongs() {
+        const ids = Array.from(ui.selSongs);
+        if (!ids.length) return;
+        ask(`Hapus <b>${ids.length} lagu</b> yang dipilih dari library beserta penempatannya di tierlist?`, async () => {
+            const u = S.entries.filter(x => ids.includes(x.songId)).map(x => x.id);
+            S.songs = S.songs.filter(x => !ids.includes(x.id));
+            S.entries = S.entries.filter(x => !ids.includes(x.songId));
+            ui.selSongs.clear();
+            await del('songs', ...ids);
+            if (u.length) await del('entries', ...u);
+            close();
+            render();
+            flash(`${ids.length} lagu berhasil dihapus ✓`);
+        });
+    },
+    clearSelSongs() {
+        ui.selSongs.clear();
+        render();
     },
     addTo(e) {
         if (!L)
@@ -390,13 +848,28 @@ const A = { nav(e) {
         touch(L);
         render();
     },
+    removeFromList(e) {
+        const id = e.dataset.i;
+        const en = S.entries.find(x => x.id === id);
+        if (!en) return;
+        const s = sg(en.songId);
+        ask(`Keluarkan “${esc(s?.title || 'lagu ini')}” dari tierlist “${esc(lst(L)?.title || '')}”? (Lagu tetap ada di Music Library)`, async () => {
+            S.entries = S.entries.filter(x => x.id !== id);
+            await del('entries', id);
+            touch(L);
+            close();
+            render();
+            flash('Lagu dikeluarkan dari tierlist ✓');
+        });
+    },
     picker() {
         V = 'lib';
         render();
     },
     left(e) {
         shift(e.dataset.i, -1);
-    }, right(e) {
+    },
+    right(e) {
         shift(e.dataset.i, 1);
     },
     snap() {
@@ -409,23 +882,41 @@ const A = { nav(e) {
         const n = { id: uid(), listId: L, ts: Date.now(), items };
         S.snaps.push(n);
         put('snaps', n);
-        flash('Snapshot dibuat ✓');
+        flash('Snapshot direkam ✓');
         if (V !== 'hist') {
             V = 'hist';
         }
         render();
     },
     delSnap(e) {
+        const id = e.dataset.i;
         ask('Hapus snapshot ini?', async () => {
-            S.snaps = S.snaps.filter(s => s.id !== e.dataset.i);
-            await del('snaps', e.dataset.i);
+            S.snaps = S.snaps.filter(s => s.id !== id);
+            ui.selSnaps.delete(id);
+            await del('snaps', id);
             close();
             render();
         });
     },
+    bulkDelSnaps() {
+        const ids = Array.from(ui.selSnaps);
+        if (!ids.length) return;
+        ask(`Hapus <b>${ids.length} snapshot</b> yang dipilih?`, async () => {
+            S.snaps = S.snaps.filter(s => !ids.includes(s.id));
+            ui.selSnaps.clear();
+            await del('snaps', ...ids);
+            close();
+            render();
+            flash(`${ids.length} snapshot berhasil dihapus ✓`);
+        });
+    },
+    clearSelSnaps() {
+        ui.selSnaps.clear();
+        render();
+    },
     viewSnap(e) {
         const s = S.snaps.find(x => x.id === e.dataset.i);
-        modal(`<h3>Snapshot ${fmt(s.ts)}</h3><p class="mu">Hanya dilihat — tidak mengubah ranking saat ini.</p>${TN.map((n, i) => `<b style="color:${TC[i]}">${n}</b><ol>${s.items.filter(x => x.tier === i).sort((a, b) => a.order - b.order).map(x => `<li>${esc(x.title)} — <span class="mu">${esc(x.artist)}</span></li>`).join('') || '<span class="mu">kosong</span>'}</ol>`).join('')}<button class="b" data-a="close">Tutup</button>`);
+        modal(`<h3>Snapshot ${fmt(s.ts)}</h3><p class="mu">Hanya dilihat — tidak mengubah susunan ranking aktif saat ini.</p>${TN.map((n, i) => `<b style="color:${TC[i]}">${n}</b><ol>${s.items.filter(x => x.tier === i).sort((a, b) => a.order - b.order).map(x => `<li>${esc(x.title)} — <span class="mu">${esc(x.artist)}</span></li>`).join('') || '<span class="mu">kosong</span>'}</ol>`).join('')}<button class="b" data-a="close">Tutup</button>`);
     },
     exportForm() {
         modal(`<h3>Ekspor PNG</h3><label>Ukuran kartu</label><select id="xs"><option value="110">Kecil</option><option value="150" selected>Sedang</option><option value="200">Besar</option></select><label>Tema</label><select id="xt"><option value="d">Navy gelap</option><option value="l">Terang</option></select><div class="row" style="margin-top:12px"><button class="b p" data-a="doExport">Unduh PNG</button><button class="b" data-a="close">Batal</button></div>`);
@@ -568,13 +1059,15 @@ const A = { nav(e) {
         catch (e) {
             flash('Restore gagal: ' + e.message, 1);
         }
-    } };
+    }
+};
 
 // ------------------------------------------------------------
 // Pengurutan lagu dan interaksi drag-and-drop
 // ------------------------------------------------------------
 function shift(id, d) {
     const e = S.entries.find(x => x.id === id);
+    if (!e) return;
     const g = eL(e.listId).filter(x => x.tier === e.tier).sort((a, b) => a.order - b.order);
     const i = g.indexOf(e);
     if (d < 0) {
@@ -606,6 +1099,7 @@ function mv(id, t, b) {
     touch(L);
     render();
 }
+
 const sq = f => new Promise((res, rej) => {
     const u = URL.createObjectURL(f);
     const i = new Image();
@@ -640,10 +1134,62 @@ document.addEventListener('input', e => {
 
 document.addEventListener('change', async (e) => {
     const t = e.target;
+
+    // Checkbox bulk selection
+    if (t.dataset.chk) {
+        const type = t.dataset.chk;
+        const id = t.dataset.i;
+
+        if (type === 'song') {
+            if (t.checked) ui.selSongs.add(id);
+            else ui.selSongs.delete(id);
+            render();
+            return;
+        }
+        if (type === 'allSongs') {
+            const q = ui.lq.toLowerCase();
+            const filtered = S.songs.filter(s => (!ui.cf || s.cat === ui.cf) && (s.title + ' ' + s.artist).toLowerCase().includes(q));
+            if (t.checked) filtered.forEach(s => ui.selSongs.add(s.id));
+            else ui.selSongs.clear();
+            render();
+            return;
+        }
+
+        if (type === 'snap') {
+            if (t.checked) ui.selSnaps.add(id);
+            else ui.selSnaps.delete(id);
+            render();
+            return;
+        }
+        if (type === 'allSnaps') {
+            const all = S.snaps.filter(s => s.listId === L);
+            if (t.checked) all.forEach(s => ui.selSnaps.add(s.id));
+            else ui.selSnaps.clear();
+            render();
+            return;
+        }
+
+        if (type === 'list') {
+            if (t.checked) ui.selLists.add(id);
+            else ui.selLists.delete(id);
+            render();
+            return;
+        }
+        if (type === 'allLists') {
+            const q = ui.q.toLowerCase();
+            const filtered = S.lists.filter(l => l.title.toLowerCase().includes(q));
+            if (t.checked) filtered.forEach(l => ui.selLists.add(l.id));
+            else ui.selLists.clear();
+            render();
+            return;
+        }
+    }
+
     if (t.dataset.s) {
         const k = t.dataset.s;
         if (k === 'hl') {
             L = t.value;
+            ui.selSnaps.clear();
         }
         else
             ui[k] = t.value;
@@ -661,10 +1207,12 @@ document.addEventListener('change', async (e) => {
         const v = t.value;
         if (v === 'x') {
             const en = S.entries.find(x => x.id === id);
-            S.entries = S.entries.filter(x => x.id !== id);
-            await del('entries', id);
-            touch(L);
-            render();
+            if (en) {
+                S.entries = S.entries.filter(x => x.id !== id);
+                await del('entries', id);
+                touch(L);
+                render();
+            }
         }
         else if (v !== 'Pindah…')
             mv(id, +v, null);
@@ -677,7 +1225,13 @@ document.addEventListener('change', async (e) => {
             return;
         try {
             ui.img = await sq(f);
-            $('#fp').innerHTML = art({ title: $('#ft').value || 'Judul', artist: $('#fa').value || 'Artis', img: ui.img, hue: ui.hue });
+            const title = $('#ft')?.value || 'Judul';
+            const artist = $('#fa')?.value || 'Artis';
+            const fp = $('#fp');
+            if (fp) fp.innerHTML = art({ title, artist, img: ui.img, hue: ui.hue });
+            const wrap = $('#imgBtnWrap');
+            if (wrap) wrap.innerHTML = '<button class="b sm dg" data-a="noimg">✕ Batalkan / Hapus Foto</button>';
+            flash('Foto sampul dipilih');
         }
         catch {
             $('#fe').textContent = 'Berkas bukan gambar yang valid.';
